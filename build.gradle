@@ -1,9 +1,7 @@
 apply plugin: 'groovy'
 apply plugin: 'java'
-apply plugin: 'maven-publish'
 
-group 'com.yu000hong'
-version '1.0-SNAPSHOT'
+group 'com.github.yu000hong'
 
 sourceCompatibility = 1.7
 
@@ -30,32 +28,6 @@ dependencies {
     //redis-mock-java
     compile group:'org.rarefiedredis.redis',name:'redis-java',version:'0.0.5'
 }
-
-// publishing {
-//     publications {
-//         mavenJava(MavenPublication) {
-//             artifactId 'idaigouyi-common'
-//             from components.java
-//         }
-//     }
-//     repositories {
-//         maven {
-//             // change to point to your repo, e.g. http://my.org/repo
-//             //url "http://10.226.244.13:8081/nexus/content/repositories/snapshots/"
-//             credentials {
-//                 username = 'yu000hong'
-//                 password = 'Sin@chin@'
-//             }
-//         }
-//     }
-// }
-
-// task deployDoc(type: Exec) {
-//     dependsOn groovydoc
-
-//     executable '/bin/bash'
-//     args '-c', "rsync -avz ${buildDir}/docs/groovydoc/ idaigouyi.com::apidoc/"
-// }
 
 test {
     useTestNG()
