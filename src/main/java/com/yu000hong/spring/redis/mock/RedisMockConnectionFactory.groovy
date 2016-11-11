@@ -10,7 +10,7 @@ import org.springframework.data.redis.connection.RedisConnectionFactory
 import org.springframework.data.redis.connection.RedisSentinelConnection
 
 class RedisMockConnectionFactory implements InitializingBean, DisposableBean, RedisConnectionFactory {
-    private RedisMockConnection connection
+    private final RedisMockConnection connection = new RedisMockConnection(new RedisMock())
 
     @Override
     void destroy() throws Exception {
@@ -24,10 +24,7 @@ class RedisMockConnectionFactory implements InitializingBean, DisposableBean, Re
 
     @Override
     RedisConnection getConnection() {
-        if(connection == null){
-            connection = new RedisMockConnection()
-        }
-        return null
+        return connection
     }
 
     @Override
