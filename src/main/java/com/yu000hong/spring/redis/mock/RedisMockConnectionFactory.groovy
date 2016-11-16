@@ -10,26 +10,26 @@ import org.springframework.data.redis.connection.RedisConnectionFactory
 import org.springframework.data.redis.connection.RedisSentinelConnection
 
 class RedisMockConnectionFactory implements InitializingBean, DisposableBean, RedisConnectionFactory {
-    private final RedisMockConnection connection = new RedisMockConnection(new RedisMock())
+    private final RedisMock redisMock = new RedisMock()
 
     @Override
     void destroy() throws Exception {
-
+        //do nothing
     }
 
     @Override
     void afterPropertiesSet() throws Exception {
-
+        //do nothing
     }
 
     @Override
     RedisConnection getConnection() {
-        return connection
+        return new RedisMockConnection(redisMock)
     }
 
     @Override
     RedisClusterConnection getClusterConnection() {
-        return null
+        throw new UnsupportedOperationException()
     }
 
     @Override
@@ -39,11 +39,11 @@ class RedisMockConnectionFactory implements InitializingBean, DisposableBean, Re
 
     @Override
     RedisSentinelConnection getSentinelConnection() {
-        return null
+        throw new UnsupportedOperationException()
     }
 
     @Override
     DataAccessException translateExceptionIfPossible(RuntimeException ex) {
-        return null
+        return new DataAccessException(ex.message, ex) {}
     }
 }

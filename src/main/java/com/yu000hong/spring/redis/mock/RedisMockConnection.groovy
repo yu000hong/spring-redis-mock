@@ -1,41 +1,27 @@
 package com.yu000hong.spring.redis.mock
 
-import org.rarefiedredis.redis.NotImplementedException
+import org.rarefiedredis.redis.IRedisClient
 import org.rarefiedredis.redis.RedisMock
-import org.springframework.data.redis.connection.AbstractRedisConnection
-import org.springframework.data.redis.connection.DataType
-import org.springframework.data.redis.connection.MessageListener
-import org.springframework.data.redis.connection.Pool
-import org.springframework.data.redis.connection.RedisListCommands
-import org.springframework.data.redis.connection.RedisNode
-import org.springframework.data.redis.connection.RedisPipelineException
-import org.springframework.data.redis.connection.RedisServerCommands
-import org.springframework.data.redis.connection.RedisStringCommands
-import org.springframework.data.redis.connection.RedisZSetCommands
-import org.springframework.data.redis.connection.ReturnType
-import org.springframework.data.redis.connection.SortParameters
-import org.springframework.data.redis.connection.Subscription
+import org.springframework.data.redis.connection.*
 import org.springframework.data.redis.core.Cursor
 import org.springframework.data.redis.core.ScanOptions
 import org.springframework.data.redis.core.types.Expiration
 import org.springframework.data.redis.core.types.RedisClientInfo
 import org.springframework.util.Assert
 
-import static com.yu000hong.spring.redis.mock.RedisMockUtil.serialize
-import static com.yu000hong.spring.redis.mock.RedisMockUtil.unserialize
+import static com.yu000hong.spring.redis.mock.Converters.*
+import static com.yu000hong.spring.redis.mock.RedisMockUtil.*
 
 class RedisMockConnection extends AbstractRedisConnection {
     private final RedisMock mock
-    private final Pool<RedisMock> pool
+    private boolean pipelined
+    private IRedisClient multiMock
+    private List<Object> pipelineResults
+    private List<Closure> multiResultConverts
 
     public RedisMockConnection(RedisMock mock) {
-        this(mock, null)
-    }
-
-    public RedisMockConnection(RedisMock mock, Pool<RedisMock> pool) {
         Assert.notNull(mock, 'a not-null instance required')
         this.mock = mock
-        this.pool = pool
     }
 
     @Override
@@ -48,25 +34,110 @@ class RedisMockConnection extends AbstractRedisConnection {
         return mock
     }
 
+    //region RedisTxCommands
+
     @Override
     boolean isQueueing() {
-        return false
+        return multiMock != null
     }
 
     @Override
+    void multi() {
+        if (isQueueing()) {
+            throw new RuntimeException('ERR MULTI calls can not be nested')
+        }
+        multiMock = mock.multi()
+        multiResultConverts = []
+    }
+
+    @Override
+    List<Object> exec() {
+        if (!isQueueing()) {
+            throw new RuntimeException('ERR EXEC without MULTI')
+        }
+        def results = []
+        def objects = multiMock.exec()
+        //convert type
+        (0..objects.size() - 1).each { i ->
+            results << multiResultConverts[i].call(objects[i])
+        }
+        multiMock = null
+        multiResultConverts = null
+        if (isPipelined()) {
+            pipelineResults += results
+            return null
+        } else {
+            return results
+        }
+    }
+
+    @Override
+    void discard() {
+        if (!isQueueing()) {
+            throw new RuntimeException('ERR DISCARD without MULTI')
+        }
+        multiMock.discard()
+        multiResultConverts = null
+        multiMock = null
+    }
+
+    @Override
+    void watch(byte[] ... keys) {
+        throw new RuntimeException('ERR WATCH inside MULTI is not allowed')
+    }
+
+    @Override
+    void unwatch() {
+        mock.unwatch()
+    }
+
+    //endregion
+
+    //region pipeline
+
+    @Override
     boolean isPipelined() {
-        return false
+        return pipelined
     }
 
     @Override
     void openPipeline() {
-        throw new UnsupportedOperationException('Pipelining not supported by redis-mock-java')
+        if (isPipelined()) {
+            return
+        }
+        if (isQueueing()) {
+            throw new RuntimeException('ERR PIPELINE inside MULTI is not allowed')
+        }
+        pipelineResults = []
+        pipelined = true
     }
 
     @Override
     List<Object> closePipeline() throws RedisPipelineException {
-        return []
+        pipelined = false
+        if (isQueueing()) {
+            exec()
+        }
+        def ret = pipelineResults
+        pipelineResults = null
+        return ret
     }
+
+    private void pipeline(Object value, Closure converter) {
+        def result
+        if (converter == null) {
+            result = value
+        } else {
+            result = converter.call(value)
+        }
+        pipelineResults << result
+    }
+
+    private void pipeline(Object value) {
+        pipelineResults << value
+    }
+
+    //endregion
 
     @Override
     Object execute(String command, byte[] ... args) {
@@ -75,6 +146,7 @@ class RedisMockConnection extends AbstractRedisConnection {
 
     @Override
     Long pfAdd(byte[] key, byte[] ... values) {
+
         return null
     }
 
@@ -88,99 +160,496 @@ class RedisMockConnection extends AbstractRedisConnection {
 
     }
 
-    @Override
-    void select(int dbIndex) {
+    //region RedisKeyCommands
 
+    @Override
+    Boolean exists(byte[] key) {
+        if (isQueueing()) {
+            client.exists(unserialize(key))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.exists(unserialize(key)))
+            return null
+        }
+        return client.exists(unserialize(key))
     }
 
     @Override
+    Long del(byte[] ... keys) {
+        if (isQueueing()) {
+            client.del(unserialize(keys))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.del(unserialize(keys)))
+            return null
+        }
+        return client.del(unserialize(keys))
+    }
+
+    @Override
+    DataType type(byte[] key) {
+        def converter = { String type ->
+            return DataType.fromCode(type)
+        }
+        if (isQueueing()) {
+            client.type(unserialize(key))
+            multiResultConverts << converter
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.type(unserialize(key)), converter)
+            return null
+        }
+        return converter.call(client.type(unserialize(key)))
+    }
+
+    @Override
+    Set<byte[]> keys(byte[] pattern) {
+        def converter = { String[] keys ->
+            def set = [] as Set
+            keys.each { key ->
+                set << serialize(key)
+            }
+            return set
+        }
+        if (isQueueing()) {
+            client.keys(unserialize(pattern))
+            multiResultConverts << converter
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.keys(unserialize(pattern)), converter)
+            return null
+        }
+        return converter.call(client.keys(unserialize(pattern)))
+    }
+
+    @Override
+    Cursor<byte[]> scan(ScanOptions options) {
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    byte[] randomKey() {
+        if (isQueueing()) {
+            client.randomkey()
+            multiResultConverts << STRING_TO_BYTES
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.randomkey(), STRING_TO_BYTES)
+            return null
+        }
+        return STRING_TO_BYTES.call(client.randomkey())
+    }
+
+    @Override
+    void rename(byte[] oldName, byte[] newName) {
+        if (isQueueing()) {
+            client.rename(unserialize(oldName), unserialize(newName))
+            multiResultConverts << DO_NOTHING
+            return
+        }
+        if (isPipelined()) {
+            pipeline(client.rename(unserialize(oldName), unserialize(newName)))
+            return
+        }
+        client.rename(unserialize(oldName), unserialize(newName))
+    }
+
+    @Override
+    Boolean renameNX(byte[] oldName, byte[] newName) {
+        if (isQueueing()) {
+            client.renamenx(unserialize(oldName), unserialize(newName))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.renamenx(unserialize(oldName), unserialize(newName)))
+            return null
+        }
+        return client.rename(unserialize(oldName), unserialize(newName))
+    }
+
+    @Override
+    Boolean expire(byte[] key, long seconds) {
+        if (isQueueing()) {
+            client.expire(unserialize(key), (int) seconds)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.expire(unserialize(key), (int) seconds))
+        }
+        return client.expire(unserialize(key), (int) seconds)
+    }
+
+    @Override
+    Boolean pExpire(byte[] key, long millis) {
+        if (isQueueing()) {
+            client.pexpire(unserialize(key), millis)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.pexpire(unserialize(key), millis))
+            return null
+        }
+        return client.pexpire(unserialize(key), millis)
+    }
+
+    @Override
+    Boolean expireAt(byte[] key, long unixTime) {
+        if (isQueueing()) {
+            client.expireat(unserialize(key), unixTime)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.expireat(unserialize(key), unixTime))
+            return null
+        }
+        return client.expireat(unserialize(key), unixTime)
+    }
+
+    @Override
+    Boolean pExpireAt(byte[] key, long unixTimeInMillis) {
+        if (isQueueing()) {
+            client.pexpireat(unserialize(key), unixTimeInMillis)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.pexpireat(unserialize(key), unixTimeInMillis))
+            return null
+        }
+        return client.pexpireat(unserialize(key), unixTimeInMillis)
+    }
+
+    @Override
+    Boolean persist(byte[] key) {
+        if (isQueueing()) {
+            client.persist(unserialize(key))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.persist(unserialize(key)))
+            return null
+        }
+        return client.persist(unserialize(key))
+    }
+
+    @Override
+    Boolean move(byte[] key, int dbIndex) {
+        def converter = { Long value ->
+            if (value) {
+                return true
+            } else {
+                return false
+            }
+        }
+        if (isQueueing()) {
+            client.move(unserialize(key), dbIndex)
+            multiResultConverts << converter
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.move(unserialize(key), dbIndex), converter)
+            return null
+        }
+        return client.move(unserialize(key), dbIndex)
+    }
+
+    @Override
+    Long ttl(byte[] key) {
+        if (isQueueing()) {
+            client.ttl(unserialize(key))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.ttl(unserialize(key)))
+            return null
+        }
+        return client.ttl(unserialize(key))
+    }
+
+    @Override
+    Long pTtl(byte[] key) {
+        if (isQueueing()) {
+            client.pttl(unserialize(key))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.pttl(unserialize(key)))
+            return null
+        }
+        return client.pttl(unserialize(key))
+    }
+
+    @Override
+    List<byte[]> sort(byte[] key, SortParameters params) {
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    Long sort(byte[] key, SortParameters params, byte[] storeKey) {
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    byte[] dump(byte[] key) {
+        if (isQueueing()) {
+            client.dump(unserialize(key))
+            multiResultConverts << STRING_TO_BYTES
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.dump(unserialize(key)), STRING_TO_BYTES)
+            return null
+        }
+        return STRING_TO_BYTES.call(client.dump(unserialize(key)))
+    }
+
+    @Override
+    void restore(byte[] key, long ttlInMillis, byte[] serializedValue) {
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
+    }
+
+    //endregion
+
+    //region RedisConnectionCommands
+
+    @Override
     byte[] echo(byte[] message) {
-        return message
+        //TODO unimplemented: because IRedisClient does not implement echo() method
+        throw new UnsupportedOperationException()
+//        return message
     }
 
     @Override
     String ping() {
-        return 'PONG'
+        //TODO unimplemented: because IRedisClient does not implement ping() method
+        throw new UnsupportedOperationException()
+//        return 'PONG'
     }
 
     @Override
+    void select(int dbIndex) {
+        if (dbIndex != 0) {
+            //RedisMock does not support multi database
+            throw new UnsupportedOperationException()
+        }
+    }
+
+    //endregion
+
+    //region RedisHashCommands
+
+    @Override
     Boolean hSet(byte[] key, byte[] field, byte[] value) {
-        return mock.hset(unserialize(key), unserialize(field), unserialize(value))
+        if (isQueueing()) {
+            client.hset(unserialize(key), unserialize(field), unserialize(value))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.hset(unserialize(key), unserialize(field), unserialize(value)))
+            return null
+        }
+        return client.hset(unserialize(key), unserialize(field), unserialize(value))
     }
 
     @Override
     Boolean hSetNX(byte[] key, byte[] field, byte[] value) {
-        return mock.hsetnx(unserialize(key), unserialize(field), unserialize(value))
+        if (isQueueing()) {
+            client.hsetnx(unserialize(key), unserialize(field), unserialize(value))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.hsetnx(unserialize(key), unserialize(field), unserialize(value)))
+            return null
+        }
+        return client.hsetnx(unserialize(key), unserialize(field), unserialize(value))
     }
 
     @Override
     byte[] hGet(byte[] key, byte[] field) {
-        return mock.hget(unserialize(key), unserialize(field))
+        if (isQueueing()) {
+            client.hget(unserialize(key), unserialize(field))
+            multiResultConverts << STRING_TO_BYTES
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.hget(unserialize(key), unserialize(field)), STRING_TO_BYTES)
+            return null
+        }
+        return STRING_TO_BYTES.call(client.hget(unserialize(key), unserialize(field)))
     }
 
     @Override
     List<byte[]> hMGet(byte[] key, byte[] ... fields) {
-//        def list = mock.hmget(unserialize(key),))
-//        TODO
-        throw new NotImplementedException()
+        def param = parseParameter(fields)
+        if (isQueueing()) {
+            client.hmget(unserialize(key), param.param, param.params)
+            multiResultConverts << STRINGLIST_TO_BYTESLIST
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.hmget(unserialize(key), param.param, param.params), STRINGLIST_TO_BYTESLIST)
+            return null
+        }
+        return STRINGLIST_TO_BYTESLIST.call(client.hmget(unserialize(key), param.param, param.params))
     }
 
     @Override
     void hMSet(byte[] key, Map<byte[], byte[]> hashes) {
-        //TODO
-        throw new NotImplementedException()
+        def field = null
+        def value = null
+        def fieldsValues = []
+        hashes.each { k, v ->
+            if (field && value) {
+                fieldsValues << unserialize(k)
+                fieldsValues << unserialize(v)
+            } else {
+                field = unserialize(k)
+                value = unserialize(v)
+            }
+        }
+        if (isQueueing()) {
+            client.hmset(unserialize(key), field, value, fieldsValues)
+            multiResultConverts << NULL
+            return
+        }
+        if (isPipelined()) {
+            pipeline(client.hmset(unserialize(key), field, value, fieldsValues), NULL)
+            return
+        }
+        client.hmset(unserialize(key), field, value, fieldsValues)
     }
 
     @Override
     Long hIncrBy(byte[] key, byte[] field, long delta) {
-        return mock.hincrby(unserialize(key), unserialize(field), delta)
+        if (isQueueing()) {
+            client.hincrby(unserialize(key), unserialize(field), delta)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.hincrby(unserialize(key), unserialize(field), delta))
+            return null
+        }
+        return client.hincrby(unserialize(key), unserialize(field), delta)
     }
 
     @Override
     Double hIncrBy(byte[] key, byte[] field, double delta) {
-        return Double.parseDouble(mock.hincrbyfloat(unserialize(key), unserialize(field), delta))
+        if (isQueueing()) {
+            client.hincrbyfloat(unserialize(key), unserialize(field), delta)
+            multiResultConverts << STRING_TO_DOUBLE
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.hincrbyfloat(unserialize(key), unserialize(field), delta), STRING_TO_DOUBLE)
+            return null
+        }
+        return STRING_TO_DOUBLE.call(client.hincrbyfloat(unserialize(key), unserialize(field), delta))
     }
 
     @Override
     Boolean hExists(byte[] key, byte[] field) {
-        return mock.hexists(unserialize(key), unserialize(field))
+        if (isQueueing()) {
+            client.hexists(unserialize(key), unserialize(field))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.hexists(unserialize(key), unserialize(field)))
+            return null
+        }
+        return client.hexists(unserialize(key), unserialize(field))
     }
 
     @Override
     Long hDel(byte[] key, byte[] ... fields) {
-//        return mock.hdel(unserialize(key), )
-        //TODO
+        def param = parseParameter(fields)
+        if (isQueueing()) {
+            client.hdel(unserialize(key), param.param, param.params)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.hdel(unserialize(key), param.param, param.params))
+            return null
+        }
+        return client.hdel(unserialize(key), param.param, param.params)
     }
 
     @Override
     Long hLen(byte[] key) {
-        return mock.hlen(unserialize(key))
+        if (isQueueing()) {
+            client.hlen(unserialize(key))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.hlen(unserialize(key)))
+            return null
+        }
+        return client.hlen(unserialize(key))
     }
 
     @Override
     Set<byte[]> hKeys(byte[] key) {
-        def keys = mock.hkeys(unserialize(key))
-        def set = [] as Set
-        keys.each { k ->
-            set << serialize(k)
+        if (isQueueing()) {
+            client.hkeys(unserialize(key))
+            multiResultConverts << STRINGSET_TO_BYTESSET
+            return null
         }
-        return set
+        if (isPipelined()) {
+            pipeline(client.hkeys(unserialize(key)), STRINGSET_TO_BYTESSET)
+            return null
+        }
+        return STRINGSET_TO_BYTESSET.call(client.hkeys(unserialize(key)))
     }
 
     @Override
     List<byte[]> hVals(byte[] key) {
-        return mock.hvals(unserialize(key)).collect { val ->
-            return serialize(val)
+        if (isQueueing()) {
+            client.hvals(unserialize(key))
+            multiResultConverts << STRINGLIST_TO_BYTESLIST
+            return null
         }
+        if (isPipelined()) {
+            pipeline(client.hvals(unserialize(key)), STRINGLIST_TO_BYTESLIST)
+            return null
+        }
+        return STRINGLIST_TO_BYTESLIST.call(client.hvals(unserialize(key)))
     }
 
     @Override
     Map<byte[], byte[]> hGetAll(byte[] key) {
-        def map = [:]
-        mock.hgetall(unserialize(key)).each { k, v ->
-            map[serialize(k)] = serialize(v)
+        if (isQueueing()) {
+            client.hgetall(unserialize(key))
+            multiResultConverts << STRINGMAP_TO_BYTESMAP
+            return null
         }
-        return map
+        if (isPipelined()) {
+            pipeline(client.hgetall(unserialize(key)), STRINGMAP_TO_BYTESMAP)
+            return null
+        }
+        return STRINGMAP_TO_BYTESMAP.call(client.hgetall(unserialize(key)))
     }
 
     @Override
@@ -188,598 +657,754 @@ class RedisMockConnection extends AbstractRedisConnection {
         return null
     }
 
-    @Override
-    Boolean exists(byte[] key) {
-        return mock.exists(unserialize(key))
-    }
+    //endregion
 
-    @Override
-    Long del(byte[] ... keys) {
-        return mock.del(unserialize(keys))
-    }
-
-    @Override
-    DataType type(byte[] key) {
-        def type = mock.type(unserialize(key))
-        return null//TODO
-    }
-
-    @Override
-    Set<byte[]> keys(byte[] pattern) {
-        return null
-    }
-
-    @Override
-    Cursor<byte[]> scan(ScanOptions options) {
-        return null
-    }
-
-    @Override
-    byte[] randomKey() {
-        return serialize(mock.randomkey())
-    }
-
-    @Override
-    void rename(byte[] oldName, byte[] newName) {
-        mock.rename(unserialize(oldName), unserialize(newName))
-    }
-
-    @Override
-    Boolean renameNX(byte[] oldName, byte[] newName) {
-        return mock.rename(unserialize(oldName), unserialize(newName))
-    }
-
-    @Override
-    Boolean expire(byte[] key, long seconds) {
-        return mock.expire(unserialize(key), (int) seconds)
-    }
-
-    @Override
-    Boolean pExpire(byte[] key, long millis) {
-        return mock.pexpire(unserialize(key), millis)
-    }
-
-    @Override
-    Boolean expireAt(byte[] key, long unixTime) {
-        return mock.expireat(unserialize(key), unixTime)
-    }
-
-    @Override
-    Boolean pExpireAt(byte[] key, long unixTimeInMillis) {
-        //TODO what's the difference between pexpireat and expireat
-        return mock.pexpireat(unserialize(key), unixTimeInMillis)
-    }
-
-    @Override
-    Boolean persist(byte[] key) {
-        return mock.persist(unserialize(key))
-    }
-
-    @Override
-    Boolean move(byte[] key, int dbIndex) {
-        return mock.move(unserialize(key), dbIndex)
-    }
-
-    @Override
-    Long ttl(byte[] key) {
-        return mock.ttl(unserialize(key))
-    }
-
-    @Override
-    Long pTtl(byte[] key) {
-        return mock.pttl(unserialize(key))
-    }
-
-    @Override
-    List<byte[]> sort(byte[] key, SortParameters params) {
-        return null
-    }
-
-    @Override
-    Long sort(byte[] key, SortParameters params, byte[] storeKey) {
-        return null
-    }
-
-    @Override
-    byte[] dump(byte[] key) {
-        return new byte[0]
-    }
-
-    @Override
-    void restore(byte[] key, long ttlInMillis, byte[] serializedValue) {
-
-    }
+    //region RedisListCommands
 
     @Override
     Long rPush(byte[] key, byte[] ... values) {
-        return null
+        def param = parseParameter(values)
+        if (isQueueing()) {
+            client.rpush(unserialize(key), param.param, param.params)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.rpush(unserialize(key), param.param, param.params))
+            return null
+        }
+        return client.rpush(unserialize(key), param.param, param.params)
     }
 
     @Override
     Long lPush(byte[] key, byte[] ... values) {
-        return null
+        def param = parseParameter(values)
+        if (isQueueing()) {
+            client.lpush(unserialize(key), param.param, param.params)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.lpush(unserialize(key), param.param, param.params))
+            return null
+        }
+        return client.lpush(unserialize(key), param.param, param.params)
     }
 
     @Override
     Long rPushX(byte[] key, byte[] value) {
-        return null
+        if (isQueueing()) {
+            client.rpushx(unserialize(key), unserialize(value))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.rpushx(unserialize(key), unserialize(value)))
+            return null
+        }
+        return client.rpushx(unserialize(key), unserialize(value))
     }
 
     @Override
     Long lPushX(byte[] key, byte[] value) {
-        return null
+        if (isQueueing()) {
+            client.lpushx(unserialize(key), unserialize(value))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.lpushx(unserialize(key), unserialize(value)))
+            return null
+        }
+        return client.lpushx(unserialize(key), unserialize(value))
     }
 
     @Override
     Long lLen(byte[] key) {
-        return null
+        if (isQueueing()) {
+            client.llen(unserialize(key))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.llen(unserialize(key)))
+            return null
+        }
+        return client.llen(unserialize(key))
     }
 
     @Override
     List<byte[]> lRange(byte[] key, long begin, long end) {
-        return null
+        if (isQueueing()) {
+            client.lrange(unserialize(key), begin, end)
+            multiResultConverts << STRINGLIST_TO_BYTESLIST
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.lrange(unserialize(key), begin, end), STRINGLIST_TO_BYTESLIST)
+            return null
+        }
+        return STRINGLIST_TO_BYTESLIST.call(client.lrange(unserialize(key), begin, end))
     }
 
     @Override
     void lTrim(byte[] key, long begin, long end) {
-
+        if (isQueueing()) {
+            client.ltrim(unserialize(key), begin, end)
+            multiResultConverts << NULL
+            return
+        }
+        if (isPipelined()) {
+            pipeline(client.ltrim(unserialize(key), begin, end), NULL)
+        }
+        client.ltrim(unserialize(key), begin, end)
     }
 
     @Override
     byte[] lIndex(byte[] key, long index) {
-        return new byte[0]
+        if (isQueueing()) {
+            client.lindex(unserialize(key), index)
+            multiResultConverts << STRING_TO_BYTES
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.lindex(unserialize(key), index), STRING_TO_BYTES)
+            return null
+        }
+        return STRING_TO_BYTES.call(client.lindex(unserialize(key), index))
     }
 
     @Override
     Long lInsert(byte[] key, RedisListCommands.Position where, byte[] pivot, byte[] value) {
-        return null
+        //TODO
+        throw new UnsupportedOperationException()
     }
 
     @Override
     void lSet(byte[] key, long index, byte[] value) {
-
+        if (isQueueing()) {
+            client.lset(unserialize(key), index, unserialize(value))
+            multiResultConverts << NULL
+            return
+        }
+        if (isPipelined()) {
+            pipeline(client.lset(unserialize(key), index, unserialize(value)), NULL)
+            return
+        }
+        client.lset(unserialize(key), index, unserialize(value))
     }
 
     @Override
     Long lRem(byte[] key, long count, byte[] value) {
-        return null
+        if (isQueueing()) {
+            client.lrem(unserialize(key), count, unserialize(value))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.lrem(unserialize(key), count, unserialize(value)))
+            return null
+        }
+        return client.lrem(unserialize(key), count, unserialize(value))
     }
 
     @Override
     byte[] lPop(byte[] key) {
-        return new byte[0]
+        if (isQueueing()) {
+            client.lpop(unserialize(key))
+            multiResultConverts << STRING_TO_BYTES
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.lpop(unserialize(key)), STRING_TO_BYTES)
+            return null
+        }
+        return STRING_TO_BYTES.call(client.lpop(unserialize(key)))
     }
 
     @Override
     byte[] rPop(byte[] key) {
-        return new byte[0]
+        if (isQueueing()) {
+            client.rpop(unserialize(key))
+            multiResultConverts << STRING_TO_BYTES
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.rpop(unserialize(key)), STRING_TO_BYTES)
+            return null
+        }
+        return STRING_TO_BYTES.call(client.rpop(unserialize(key)))
     }
 
     @Override
     List<byte[]> bLPop(int timeout, byte[] ... keys) {
-        return null
+        //TODO RedisMock does not support blpop()
+        throw new UnsupportedOperationException()
     }
 
     @Override
     List<byte[]> bRPop(int timeout, byte[] ... keys) {
-        return null
+        //TODO RedisMock does not support brpop()
+        throw new UnsupportedOperationException()
     }
 
     @Override
     byte[] rPopLPush(byte[] srcKey, byte[] dstKey) {
-        return new byte[0]
+        if (isQueueing()) {
+            client.rpoplpush(unserialize(srcKey), unserialize(dstKey))
+            multiResultConverts << STRING_TO_BYTES
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.rpoplpush(unserialize(srcKey), unserialize(dstKey)), STRING_TO_BYTES)
+            return null
+        }
+        return STRING_TO_BYTES.call(client.rpoplpush(unserialize(srcKey), unserialize(dstKey)))
     }
 
     @Override
     byte[] bRPopLPush(int timeout, byte[] srcKey, byte[] dstKey) {
-        return new byte[0]
+        //TODO RedisMock does not support brpoplpush()
+        throw new UnsupportedOperationException()
     }
 
-    @Override
-    boolean isSubscribed() {
-        return false
-    }
+    //endregion
 
-    @Override
-    Subscription getSubscription() {
-        return null
-    }
-
-    @Override
-    Long publish(byte[] channel, byte[] message) {
-        return null
-    }
-
-    @Override
-    void subscribe(MessageListener listener, byte[] ... channels) {
-
-    }
-
-    @Override
-    void pSubscribe(MessageListener listener, byte[] ... patterns) {
-
-    }
-
-    @Override
-    void scriptFlush() {
-
-    }
-
-    @Override
-    void scriptKill() {
-
-    }
-
-    @Override
-    String scriptLoad(byte[] script) {
-        return null
-    }
-
-    @Override
-    List<Boolean> scriptExists(String... scriptShas) {
-        return null
-    }
-
-    @Override
-    def <T> T eval(byte[] script, ReturnType returnType, int numKeys, byte[] ... keysAndArgs) {
-        return null
-    }
-
-    @Override
-    def <T> T evalSha(String scriptSha, ReturnType returnType, int numKeys, byte[] ... keysAndArgs) {
-        return null
-    }
-
-    @Override
-    def <T> T evalSha(byte[] scriptSha, ReturnType returnType, int numKeys, byte[] ... keysAndArgs) {
-        return null
-    }
-
-    @Override
-    void bgWriteAof() {
-
-    }
-
-    @Override
-    void bgReWriteAof() {
-
-    }
-
-    @Override
-    void bgSave() {
-
-    }
-
-    @Override
-    Long lastSave() {
-        return null
-    }
-
-    @Override
-    void save() {
-
-    }
-
-    @Override
-    Long dbSize() {
-        return null
-    }
-
-    @Override
-    void flushDb() {
-
-    }
-
-    @Override
-    void flushAll() {
-
-    }
-
-    @Override
-    Properties info() {
-        return null
-    }
-
-    @Override
-    Properties info(String section) {
-        return nu
-
-    }
-
-    @Override
-    void shutdown() {
-
-    }
-
-    @Override
-    void shutdown(RedisServerCommands.ShutdownOption option) {
-
-    }
-
-    @Override
-    List<String> getConfig(String pattern) {
-        return null
-    }
-
-    @Override
-    void setConfig(String param, String value) {
-
-    }
-
-    @Override
-    void resetConfigStats() {
-
-    }
-
-    @Override
-    Long time() {
-        return null
-    }
-
-    @Override
-    void killClient(String host, int port) {
-
-    }
-
-    @Override
-    void setClientName(byte[] name) {
-
-    }
-
-    @Override
-    String getClientName() {
-        return null
-    }
-
-    @Override
-    List<RedisClientInfo> getClientList() {
-        return null
-    }
-
-    @Override
-    void slaveOf(String host, int port) {
-
-    }
-
-    @Override
-    void slaveOfNoOne() {
-
-    }
-
-    @Override
-    void migrate(byte[] key, RedisNode target, int dbIndex, RedisServerCommands.MigrateOption option) {
-
-    }
-
-    @Override
-    void migrate(byte[] key, RedisNode target, int dbIndex, RedisServerCommands.MigrateOption option, long timeout) {
-
-    }
+    //region RedisSetCommands
 
     @Override
     Long sAdd(byte[] key, byte[] ... values) {
-        return null
+        def param = parseParameter(values)
+        if (isQueueing()) {
+            client.sadd(unserialize(key), param.param, param.params)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.sadd(unserialize(key), param.param, param.params))
+            return null
+        }
+        return client.sadd(unserialize(key), param.param, param.params)
     }
 
     @Override
     Long sRem(byte[] key, byte[] ... values) {
-        return null
+        def param = parseParameter(values)
+        if (isQueueing()) {
+            client.srem(unserialize(key), param.param, param.params)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.srem(unserialize(key), param.param, param.params))
+            return null
+        }
+        return client.srem(unserialize(key), param.param, param.params)
     }
 
     @Override
     byte[] sPop(byte[] key) {
-        return new byte[0]
+        if (isQueueing()) {
+            client.spop(unserialize(key))
+            multiResultConverts << STRING_TO_BYTES
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.spop(unserialize(key)), STRING_TO_BYTES)
+            return null
+        }
+        return STRING_TO_BYTES.call(client.spop(unserialize(key)))
     }
 
     @Override
     Boolean sMove(byte[] srcKey, byte[] destKey, byte[] value) {
-        return null
+        if (isQueueing()) {
+            client.smove(unserialize(srcKey), unserialize(destKey), unserialize(value))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.smove(unserialize(srcKey), unserialize(destKey), unserialize(value)))
+            return null
+        }
+        return client.smove(unserialize(srcKey), unserialize(destKey), unserialize(value))
     }
 
     @Override
     Long sCard(byte[] key) {
-        return null
+        if (isQueueing()) {
+            client.scard(unserialize(key))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.scard(unserialize(key)))
+            return null
+        }
+        return client.scard(unserialize(key))
     }
 
     @Override
     Boolean sIsMember(byte[] key, byte[] value) {
-        return null
+        return doing(DO_NOTHING) {
+            return client.sismember(unserialize(key), unserialize(value))
+        }
     }
 
     @Override
     Set<byte[]> sInter(byte[] ... keys) {
-        return null
+        return doing(STRINGSET_TO_BYTESSET) {
+            def param = parseParameter(keys)
+            return client.sinter(param.param, param.params)
+        }
     }
 
     @Override
     Long sInterStore(byte[] destKey, byte[] ... keys) {
-        return null
+        return doing() {
+            def param = parseParameter(keys)
+            def dest = unserialize(destKey)
+            return client.sinterstore(dest, param.param, param.params)
+        }
     }
 
     @Override
     Set<byte[]> sUnion(byte[] ... keys) {
-        return null
+        return doing(STRINGSET_TO_BYTESSET) {
+            def param = parseParameter(keys)
+            return client.sunion(param.param, param.params)
+        }
     }
 
     @Override
     Long sUnionStore(byte[] destKey, byte[] ... keys) {
-        return null
+        return doing() {
+            def param = parseParameter(keys)
+            def dest = unserialize(destKey)
+            return client.sunionstore(dest, param.param, param.params)
+        }
     }
 
     @Override
     Set<byte[]> sDiff(byte[] ... keys) {
-        return null
+        return doing(STRINGSET_TO_BYTESSET) {
+            def param = parseParameter(keys)
+            return client.sdiff(param.param, param.params)
+        }
     }
 
     @Override
     Long sDiffStore(byte[] destKey, byte[] ... keys) {
-        return null
+        return doing() {
+            def param = parseParameter(keys)
+            def dest = unserialize(destKey)
+            return client.sdiffstore(dest, param.param, param.params)
+        }
     }
 
     @Override
     Set<byte[]> sMembers(byte[] key) {
-        return null
+        return doing(STRINGSET_TO_BYTESSET) {
+            return client.smembers(unserialize(key))
+        }
     }
 
     @Override
     byte[] sRandMember(byte[] key) {
-        return new byte[0]
+        return doing(STRING_TO_BYTES) {
+            return client.srandmember(unserialize(key))
+        }
     }
 
     @Override
     List<byte[]> sRandMember(byte[] key, long count) {
-        return null
+        return doing(STRINGLIST_TO_BYTESLIST) {
+            return client.srandmember(unserialize(key), count)
+        }
     }
 
     @Override
     Cursor<byte[]> sScan(byte[] key, ScanOptions options) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
+
+    //endregion
+
+    //region RedisStringCommands
 
     @Override
     byte[] get(byte[] key) {
-        return serialize(mock.get(unserialize(key)))
+        if (isQueueing()) {
+            client.get(unserialize(key))
+            multiResultConverts << STRING_TO_BYTES
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.get(unserialize(key)), STRING_TO_BYTES)
+            return null
+        }
+        return STRING_TO_BYTES.call(client.get(unserialize(key)))
     }
 
     @Override
     byte[] getSet(byte[] key, byte[] value) {
-        return serialize(mock.getset(unserialize(key), unserialize(value)))
+        if (isQueueing()) {
+            client.getset(unserialize(key), unserialize(value))
+            multiResultConverts << STRING_TO_BYTES
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.getset(unserialize(key), unserialize(value)), STRING_TO_BYTES)
+            return null
+        }
+        return STRING_TO_BYTES.call(client.getset(unserialize(key), unserialize(value)))
     }
 
     @Override
     List<byte[]> mGet(byte[] ... keys) {
-        return null
+        if (isQueueing()) {
+            client.mget(unserialize(keys))
+            multiResultConverts << STRINGS_TO_BYTESLIST
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.mget(unserialize(keys)), STRINGS_TO_BYTESLIST)
+            return null
+        }
+        return STRINGS_TO_BYTESLIST.call(client.mget(unserialize(keys)))
     }
 
     @Override
     void set(byte[] key, byte[] value) {
-        mock.set(unserialize(key), unserialize(value))
+        if (isQueueing()) {
+            client.set(unserialize(key), unserialize(value))
+            multiResultConverts << NULL
+            return
+        }
+        if (isPipelined()) {
+            pipeline(client.set(unserialize(key), unserialize(value)), NULL)
+            return
+        }
+        client.set(unserialize(key), unserialize(value))
     }
 
     @Override
     void set(byte[] key, byte[] value, Expiration expiration, RedisStringCommands.SetOption option) {
-
+        def options = []
+        if (expiration) {
+            options << "PX ${expiration.expirationTimeInMilliseconds}"
+        }
+        if (option) {
+            switch (option) {
+                case RedisStringCommands.SetOption.UPSERT:
+                    //do nothing
+                    break
+                case RedisStringCommands.SetOption.SET_IF_ABSENT:
+                    options << 'NX'
+                    break
+                case RedisStringCommands.SetOption.SET_IF_PRESENT:
+                    options << 'XX'
+                    break
+                default:
+                    throw new RuntimeException("invalid option: $option")
+            }
+        }
+        if (isQueueing()) {
+            client.set(unserialize(key), unserialize(value), options)
+            multiResultConverts << NULL
+            return
+        }
+        if (isPipelined()) {
+            pipeline(client.set(unserialize(key), unserialize(value), options), NULL)
+            return
+        }
+        client.set(unserialize(key), unserialize(value), options)
     }
 
     @Override
     Boolean setNX(byte[] key, byte[] value) {
-        return mock.setnx()
+        if (isQueueing()) {
+            client.setnx(unserialize(key), unserialize(value))
+            multiResultConverts << LONG_TO_BOOLEAN
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.setnx(unserialize(key), unserialize(value)), LONG_TO_BOOLEAN)
+            return null
+        }
+        return LONG_TO_BOOLEAN.call(client.setnx(unserialize(key), unserialize(value)))
     }
 
     @Override
     void setEx(byte[] key, long seconds, byte[] value) {
-
+        if (isQueueing()) {
+            client.setex(unserialize(key), (int) seconds, unserialize(value))
+            multiResultConverts << NULL
+            return
+        }
+        if (isPipelined()) {
+            pipeline(client.setex(unserialize(key), (int) seconds, unserialize(value)), NULL)
+            return
+        }
+        client.setex(unserialize(key), (int) seconds, unserialize(value))
     }
 
     @Override
     void pSetEx(byte[] key, long milliseconds, byte[] value) {
-
+        if (isQueueing()) {
+            client.psetex(unserialize(key), milliseconds, unserialize(value))
+            multiResultConverts << NULL
+            return
+        }
+        if (isPipelined()) {
+            pipeline(client.psetex(unserialize(key), milliseconds, unserialize(value)), NULL)
+            return
+        }
+        client.psetex(unserialize(key), milliseconds, unserialize(value))
     }
 
     @Override
     void mSet(Map<byte[], byte[]> tuple) {
-
+        def keysValues = []
+        tuple.each { k, v ->
+            keysValues << unserialize(k)
+            keysValues << unserialize(v)
+        }
+        if (isQueueing()) {
+            client.mset(keysValues)
+            multiResultConverts << NULL
+            return
+        }
+        if (isPipelined()) {
+            pipeline(client.mset(keysValues), NULL)
+            return
+        }
+        client.mset(keysValues)
     }
 
     @Override
     Boolean mSetNX(Map<byte[], byte[]> tuple) {
-        return null
+        def keysValues = []
+        tuple.each { k, v ->
+            keysValues << unserialize(k)
+            keysValues << unserialize(v)
+        }
+        if (isQueueing()) {
+            client.msetnx(keysValues)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.msetnx(keysValues))
+            return null
+        }
+        return client.msetnx(keysValues)
     }
 
     @Override
     Long incr(byte[] key) {
-        return mock.incr(unserialize(key))
+        if (isQueueing()) {
+            client.incr(unserialize(key))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.incr(unserialize(key)))
+            return null
+        }
+        return client.incr(unserialize(key))
     }
 
     @Override
     Long incrBy(byte[] key, long value) {
-        return mock.incrby(unserialize(key), value)
+        if (isQueueing()) {
+            client.incrby(unserialize(key), value)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.incrby(unserialize(key), value))
+            return null
+        }
+        return client.incrby(unserialize(key), value)
     }
 
     @Override
     Double incrBy(byte[] key, double value) {
-        return Double.parseDouble(mock.incrbyfloat(unserialize(key), value))
+        def converter = { String string ->
+            return Double.parseDouble(string)
+        }
+        if (isQueueing()) {
+            client.incrbyfloat(unserialize(key), value)
+            multiResultConverts << converter
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.incrbyfloat(unserialize(key), value), converter)
+            return null
+        }
+        return converter.call(client.incrbyfloat(unserialize(key), value))
     }
 
     @Override
     Long decr(byte[] key) {
-        return mock.decr(unserialize(key))
+        if (isQueueing()) {
+            client.decr(unserialize(key))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.decr(unserialize(key)))
+            return null
+        }
+        return client.decr(unserialize(key))
     }
 
     @Override
     Long decrBy(byte[] key, long value) {
-        return null
+        if (isQueueing()) {
+            client.decrby(unserialize(key), value)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.decrby(unserialize(key), value))
+            return null
+        }
+        return client.decrby(unserialize(key), value)
     }
 
     @Override
     Long append(byte[] key, byte[] value) {
-        return null
+        if (isQueueing()) {
+            client.append(unserialize(key), unserialize(value))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.append(unserialize(key), unserialize(value)))
+            return null
+        }
+        return client.append(unserialize(key), unserialize(value))
     }
 
     @Override
     byte[] getRange(byte[] key, long begin, long end) {
-        return new byte[0]
+        if (isQueueing()) {
+            client.getrange(unserialize(key), begin, end)
+            multiResultConverts << STRING_TO_BYTES
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.getrange(unserialize(key), begin, end), STRING_TO_BYTES)
+            return null
+        }
+        return STRING_TO_BYTES.call(client.getrange(unserialize(key), begin, end))
     }
 
     @Override
     void setRange(byte[] key, byte[] value, long offset) {
-
+        if (isQueueing()) {
+            client.setrange(unserialize(key), offset, unserialize(value))
+            multiResultConverts << NULL
+            return
+        }
+        if (isPipelined()) {
+            pipeline(client.setrange(unserialize(key), offset, unserialize(value)), NULL)
+            return
+        }
+        client.setrange(unserialize(key), offset, unserialize(value))
     }
 
     @Override
     Boolean getBit(byte[] key, long offset) {
-        return null
+        if (isQueueing()) {
+            client.getbit(unserialize(key), offset)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.getbit(unserialize(key), offset))
+            return null
+        }
+        return client.getbit(unserialize(key), offset)
     }
 
     @Override
     Boolean setBit(byte[] key, long offset, boolean value) {
-        return null
+        if (isQueueing()) {
+            client.setbit(unserialize(key), offset, value)
+            multiResultConverts << LONG_TO_BOOLEAN
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.setbit(unserialize(key), offset, value), LONG_TO_BOOLEAN)
+            return null
+        }
+        return LONG_TO_BOOLEAN.call(client.setbit(unserialize(key), offset, value))
     }
 
     @Override
     Long bitCount(byte[] key) {
-        return null
+        if (isQueueing()) {
+            client.bitcount(unserialize(key))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.bitcount(unserialize(key)))
+            return null
+        }
+        return client.bitcount(unserialize(key))
     }
 
     @Override
     Long bitCount(byte[] key, long begin, long end) {
-        return null
+        if (isQueueing()) {
+            client.bitcount(unserialize(key), begin, end)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.bitcount(unserialize(key), begin, end))
+            return null
+        }
+        return client.bitcount(unserialize(key), begin, end)
     }
 
     @Override
     Long bitOp(RedisStringCommands.BitOperation op, byte[] destination, byte[] ... keys) {
-        return null
+        String operation = op.toString().toLowerCase()
+        String destKey = unserialize(destination)
+        String opKeys = unserialize(keys)
+        if (isQueueing()) {
+            client.bitop(operation, destKey, opKeys)
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.bitop(operation, destKey, opKeys))
+            return null
+        }
+        return client.bitop(operation, destKey, opKeys)
     }
 
     @Override
     Long strLen(byte[] key) {
-        return null
+        if (isQueueing()) {
+            client.strlen(unserialize(key))
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(client.strlen(unserialize(key)))
+            return null
+        }
+        return client.strlen(unserialize(key))
     }
 
-    @Override
-    void multi() {
-
-    }
-
-    @Override
-    List<Object> exec() {
-        return null
-    }
-
-    @Override
-    void discard() {
-
-    }
-
-    @Override
-    void watch(byte[] ... keys) {
-
-    }
-
-    @Override
-    void unwatch() {
-
-    }
+    //endregion
 
     @Override
     Boolean zAdd(byte[] key, double score, byte[] value) {
@@ -995,4 +1620,234 @@ class RedisMockConnection extends AbstractRedisConnection {
     Set<byte[]> zRangeByLex(byte[] key, RedisZSetCommands.Range range, RedisZSetCommands.Limit limit) {
         return null
     }
+
+    //region RedisPubSubCommands
+
+    @Override
+    boolean isSubscribed() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    Subscription getSubscription() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    Long publish(byte[] channel, byte[] message) {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void subscribe(MessageListener listener, byte[] ... channels) {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void pSubscribe(MessageListener listener, byte[] ... patterns) {
+        throw new UnsupportedOperationException()
+    }
+
+    //endregion
+
+    //region RedisScriptingCommands
+
+    @Override
+    void scriptFlush() {
+        //TODO RedisMock support lua script
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void scriptKill() {
+        //TODO RedisMock support lua script
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    String scriptLoad(byte[] script) {
+        //TODO RedisMock support lua script
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    List<Boolean> scriptExists(String... scriptShas) {
+        //TODO RedisMock support lua script
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    def <T> T eval(byte[] script, ReturnType returnType, int numKeys, byte[] ... keysAndArgs) {
+        //TODO RedisMock support lua script
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    def <T> T evalSha(String scriptSha, ReturnType returnType, int numKeys, byte[] ... keysAndArgs) {
+        //TODO RedisMock support lua script
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    def <T> T evalSha(byte[] scriptSha, ReturnType returnType, int numKeys, byte[] ... keysAndArgs) {
+        //TODO RedisMock support lua script
+        throw new UnsupportedOperationException()
+    }
+
+    //endregion
+
+    //region RedisServerCommands
+
+    @Override
+    void bgWriteAof() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void bgReWriteAof() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void bgSave() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    Long lastSave() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void save() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    Long dbSize() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void flushDb() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void flushAll() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    Properties info() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    Properties info(String section) {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void shutdown() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void shutdown(RedisServerCommands.ShutdownOption option) {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    List<String> getConfig(String pattern) {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void setConfig(String param, String value) {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void resetConfigStats() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    Long time() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void killClient(String host, int port) {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void setClientName(byte[] name) {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    String getClientName() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    List<RedisClientInfo> getClientList() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void slaveOf(String host, int port) {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void slaveOfNoOne() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void migrate(byte[] key, RedisNode target, int dbIndex, RedisServerCommands.MigrateOption option) {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
+    void migrate(byte[] key, RedisNode target, int dbIndex, RedisServerCommands.MigrateOption option, long timeout) {
+        throw new UnsupportedOperationException()
+    }
+
+    //endregion
+
+    private IRedisClient getClient() {
+        return isQueueing() ? multiMock : mock
+    }
+
+    private <T, S> T doing(Closure<T> converter, Closure<S> work) {
+        if (isQueueing()) {
+            work.call()
+            multiResultConverts << converter
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(work.call(), converter)
+            return null
+        }
+        return converter.call(work.call())
+    }
+
+    private <T> T doing(Closure<T> work) {
+        if (isQueueing()) {
+            work.call()
+            multiResultConverts << DO_NOTHING
+            return null
+        }
+        if (isPipelined()) {
+            pipeline(work.call())
+            return null
+        }
+        return work.call()
+    }
+
 }

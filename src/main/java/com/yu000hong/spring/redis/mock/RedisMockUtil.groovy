@@ -24,10 +24,20 @@ class RedisMockUtil {
         return new String(value, StandardCharsets.UTF_8)
     }
 
-    public static final String[] unserialize(byte[]... vals) {
+    public static final String[] unserialize(byte[] ... vals) {
         def array = new String[vals.length]
         //TODO
         return array
+    }
+
+    public static MockParameter parseParameter(byte[] ... values) {
+        def strings = unserialize(values)
+        def element = strings[0]
+        def elements = []
+        (1..strings.length - 1).each { int i ->
+            elements << strings[i]
+        }
+        return new MockParameter(param: element, params: elements)
     }
 
 }
