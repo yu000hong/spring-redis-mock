@@ -11,12 +11,6 @@ class RedisMockUtil {
         return value.getBytes(StandardCharsets.UTF_8)
     }
 
-    public static final byte[][] serialize(String... vals) {
-        def array = new byte[vals.length][]
-        //TODO
-        return array
-    }
-
     public static final String unserialize(byte[] value) {
         if (value == null) {
             return null
