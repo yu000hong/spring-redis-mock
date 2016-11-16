@@ -1,6 +1,7 @@
 package com.yu000hong.spring.redis.mock
 
 import org.rarefiedredis.redis.IRedisClient
+import org.rarefiedredis.redis.IRedisSortedSet
 import org.rarefiedredis.redis.RedisMock
 import org.springframework.data.redis.connection.*
 import org.springframework.data.redis.core.Cursor
@@ -141,24 +142,28 @@ class RedisMockConnection extends AbstractRedisConnection {
 
     @Override
     Object execute(String command, byte[] ... args) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
+
+    //region HyperLogLogCommands
 
     @Override
     Long pfAdd(byte[] key, byte[] ... values) {
-
-        return null
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Long pfCount(byte[] ... keys) {
-        return null
+        throw new UnsupportedOperationException()
     }
 
     @Override
     void pfMerge(byte[] destinationKey, byte[] ... sourceKeys) {
-
+        throw new UnsupportedOperationException()
     }
+
+    //endregion
 
     //region RedisKeyCommands
 
@@ -654,7 +659,8 @@ class RedisMockConnection extends AbstractRedisConnection {
 
     @Override
     Cursor<Map.Entry<byte[], byte[]>> hScan(byte[] key, ScanOptions options) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     //endregion
@@ -1406,220 +1412,272 @@ class RedisMockConnection extends AbstractRedisConnection {
 
     //endregion
 
+    //region RedisZSetCommands
+
     @Override
     Boolean zAdd(byte[] key, double score, byte[] value) {
-        return null
+        return doing(LONG_TO_BOOLEAN) {
+            def scoreMember = new IRedisSortedSet.ZsetPair(unserialize(value), score)
+            return client.zadd(unserialize(key), scoreMember)
+        }
     }
 
     @Override
     Long zAdd(byte[] key, Set<RedisZSetCommands.Tuple> tuples) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Long zRem(byte[] key, byte[] ... values) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Double zIncrBy(byte[] key, double increment, byte[] value) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Long zRank(byte[] key, byte[] value) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Long zRevRank(byte[] key, byte[] value) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRange(byte[] key, long begin, long end) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<RedisZSetCommands.Tuple> zRangeWithScores(byte[] key, long begin, long end) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRangeByScore(byte[] key, double min, double max) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<RedisZSetCommands.Tuple> zRangeByScoreWithScores(byte[] key, RedisZSetCommands.Range range) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<RedisZSetCommands.Tuple> zRangeByScoreWithScores(byte[] key, double min, double max) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRangeByScore(byte[] key, double min, double max, long offset, long count) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<RedisZSetCommands.Tuple> zRangeByScoreWithScores(byte[] key, double min, double max, long offset, long count) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<RedisZSetCommands.Tuple> zRangeByScoreWithScores(byte[] key, RedisZSetCommands.Range range, RedisZSetCommands.Limit limit) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRevRange(byte[] key, long begin, long end) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<RedisZSetCommands.Tuple> zRevRangeWithScores(byte[] key, long begin, long end) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRevRangeByScore(byte[] key, double min, double max) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRevRangeByScore(byte[] key, RedisZSetCommands.Range range) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<RedisZSetCommands.Tuple> zRevRangeByScoreWithScores(byte[] key, double min, double max) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRevRangeByScore(byte[] key, double min, double max, long offset, long count) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRevRangeByScore(byte[] key, RedisZSetCommands.Range range, RedisZSetCommands.Limit limit) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<RedisZSetCommands.Tuple> zRevRangeByScoreWithScores(byte[] key, double min, double max, long offset, long count) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<RedisZSetCommands.Tuple> zRevRangeByScoreWithScores(byte[] key, RedisZSetCommands.Range range) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<RedisZSetCommands.Tuple> zRevRangeByScoreWithScores(byte[] key, RedisZSetCommands.Range range, RedisZSetCommands.Limit limit) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Long zCount(byte[] key, double min, double max) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Long zCount(byte[] key, RedisZSetCommands.Range range) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Long zCard(byte[] key) {
-        return null
+        return doing() {
+            return client.zcard(unserialize(key))
+        }
     }
 
     @Override
     Double zScore(byte[] key, byte[] value) {
-        return null
+        return doing() {
+            return client.zscore(unserialize(key), unserialize(value))
+        }
     }
 
     @Override
     Long zRemRange(byte[] key, long begin, long end) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Long zRemRangeByScore(byte[] key, double min, double max) {
-        return null
+        return doing() {
+            return client.zremrangebyscore(unserialize(key), String.valueOf(min), String.valueOf(max))
+        }
     }
 
     @Override
     Long zRemRangeByScore(byte[] key, RedisZSetCommands.Range range) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Long zUnionStore(byte[] destKey, byte[] ... sets) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Long zUnionStore(byte[] destKey, RedisZSetCommands.Aggregate aggregate, int[] weights, byte[] ... sets) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Long zInterStore(byte[] destKey, byte[] ... sets) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Long zInterStore(byte[] destKey, RedisZSetCommands.Aggregate aggregate, int[] weights, byte[] ... sets) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Cursor<RedisZSetCommands.Tuple> zScan(byte[] key, ScanOptions options) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRangeByScore(byte[] key, String min, String max) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRangeByScore(byte[] key, RedisZSetCommands.Range range) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRangeByScore(byte[] key, String min, String max, long offset, long count) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRangeByScore(byte[] key, RedisZSetCommands.Range range, RedisZSetCommands.Limit limit) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRangeByLex(byte[] key) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRangeByLex(byte[] key, RedisZSetCommands.Range range) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
 
     @Override
     Set<byte[]> zRangeByLex(byte[] key, RedisZSetCommands.Range range, RedisZSetCommands.Limit limit) {
-        return null
+        //TODO unimplemented
+        throw new UnsupportedOperationException()
     }
+
+    //endregion
 
     //region RedisPubSubCommands
 
