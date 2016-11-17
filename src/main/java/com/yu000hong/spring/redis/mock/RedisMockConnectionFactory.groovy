@@ -12,6 +12,10 @@ import org.springframework.data.redis.connection.RedisSentinelConnection
 class RedisMockConnectionFactory implements InitializingBean, DisposableBean, RedisConnectionFactory {
     private final RedisMock redisMock = new RedisMock()
 
+    public RedisMock getRedisMock() {
+        return redisMock
+    }
+
     @Override
     void destroy() throws Exception {
         //do nothing
