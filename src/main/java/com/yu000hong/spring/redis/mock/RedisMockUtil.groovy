@@ -20,7 +20,10 @@ class RedisMockUtil {
 
     public static final String[] unserialize(byte[] ... vals) {
         def array = new String[vals.length]
-        //TODO
+        def i = 0
+        vals.each { val ->
+            array[i++] = unserialize(val)
+        }
         return array
     }
 
