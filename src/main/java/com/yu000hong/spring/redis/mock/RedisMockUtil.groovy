@@ -34,7 +34,7 @@ class RedisMockUtil {
         (1..strings.length - 1).each { int i ->
             elements << strings[i]
         }
-        return new MockParameter(param: element, params: elements)
+        return new MockParameter(param: element, params: elements as String[])
     }
 
 }

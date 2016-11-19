@@ -6,5 +6,5 @@ package com.yu000hong.spring.redis.mock
  */
 class MockParameter {
     String param //第一个固定参数
-    String params//第二个可变参数
+    String[] params//第二个可变参数
 }
