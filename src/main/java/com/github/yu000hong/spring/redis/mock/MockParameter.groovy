@@ -1,4 +1,4 @@
-package com.yu000hong.spring.redis.mock
+package com.github.yu000hong.spring.redis.mock
 
 /**
  * RedisMock参数

@@ -1,4 +1,4 @@
-package com.yu000hong.spring.redis.mock
+package com.github.yu000hong.spring.redis.mock
 
 import org.rarefiedredis.redis.RedisMock
 import org.springframework.beans.factory.DisposableBean

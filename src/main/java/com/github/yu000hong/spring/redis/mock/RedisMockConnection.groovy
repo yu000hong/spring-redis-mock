@@ -1,4 +1,4 @@
-package com.yu000hong.spring.redis.mock
+package com.github.yu000hong.spring.redis.mock
 
 import org.rarefiedredis.redis.IRedisClient
 import org.rarefiedredis.redis.IRedisSortedSet
@@ -10,8 +10,8 @@ import org.springframework.data.redis.core.types.Expiration
 import org.springframework.data.redis.core.types.RedisClientInfo
 import org.springframework.util.Assert
 
-import static com.yu000hong.spring.redis.mock.Converters.*
-import static com.yu000hong.spring.redis.mock.RedisMockUtil.*
+import static com.github.yu000hong.spring.redis.mock.Converters.*
+import static com.github.yu000hong.spring.redis.mock.RedisMockUtil.*
 
 class RedisMockConnection extends AbstractRedisConnection {
     private final RedisMock mock
@@ -58,9 +58,13 @@ class RedisMockConnection extends AbstractRedisConnection {
         }
         def results = []
         def objects = multiMock.exec()
-        //convert type
-        (0..objects.size() - 1).each { i ->
-            results << multiResultConverts[i].call(objects[i])
+        if (objects == null) {
+            results << null
+        } else {
+            //convert type
+            (0..objects.size() - 1).each { i ->
+                results << multiResultConverts[i].call(objects[i])
+            }
         }
         multiMock = null
         multiResultConverts = null
@@ -84,7 +88,12 @@ class RedisMockConnection extends AbstractRedisConnection {
 
     @Override
     void watch(byte[] ... keys) {
-        throw new RuntimeException('ERR WATCH inside MULTI is not allowed')
+        if (isQueueing()) {
+            throw new RuntimeException('ERR WATCH inside MULTI is not allowed')
+        }
+        keys.each { bytes ->
+            mock.watch(unserialize(bytes))
+        }
     }
 
     @Override
@@ -1099,7 +1108,8 @@ class RedisMockConnection extends AbstractRedisConnection {
     void set(byte[] key, byte[] value, Expiration expiration, RedisStringCommands.SetOption option) {
         def options = []
         if (expiration) {
-            options << "PX ${expiration.expirationTimeInMilliseconds}"
+            options << 'px'
+            options << String.valueOf(expiration.expirationTimeInMilliseconds)
         }
         if (option) {
             switch (option) {
@@ -1107,25 +1117,25 @@ class RedisMockConnection extends AbstractRedisConnection {
                     //do nothing
                     break
                 case RedisStringCommands.SetOption.SET_IF_ABSENT:
-                    options << 'NX'
+                    options << 'nx'
                     break
                 case RedisStringCommands.SetOption.SET_IF_PRESENT:
-                    options << 'XX'
+                    options << 'xx'
                     break
                 default:
                     throw new RuntimeException("invalid option: $option")
             }
         }
         if (isQueueing()) {
-            client.set(unserialize(key), unserialize(value), options)
+            client.set(unserialize(key), unserialize(value), options as String[])
             multiResultConverts << NULL
             return
         }
         if (isPipelined()) {
-            pipeline(client.set(unserialize(key), unserialize(value), options), NULL)
+            pipeline(client.set(unserialize(key), unserialize(value), options as String[]), NULL)
             return
         }
-        client.set(unserialize(key), unserialize(value), options)
+        client.set(unserialize(key), unserialize(value), options as String[])
     }
 
     @Override
