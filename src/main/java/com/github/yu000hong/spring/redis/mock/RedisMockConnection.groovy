@@ -542,15 +542,15 @@ class RedisMockConnection extends AbstractRedisConnection {
             }
         }
         if (isQueueing()) {
-            client.hmset(unserialize(key), field, value, fieldsValues)
+            client.hmset(unserialize(key), field, value, fieldsValues as String[])
             multiResultConverts << NULL
             return
         }
         if (isPipelined()) {
-            pipeline(client.hmset(unserialize(key), field, value, fieldsValues), NULL)
+            pipeline(client.hmset(unserialize(key), field, value, fieldsValues as String[]), NULL)
             return
         }
-        client.hmset(unserialize(key), field, value, fieldsValues)
+        client.hmset(unserialize(key), field, value, fieldsValues as String[])
     }
 
     @Override

@@ -31,8 +31,10 @@ class RedisMockUtil {
         def strings = unserialize(values)
         def element = strings[0]
         def elements = []
-        (1..strings.length - 1).each { int i ->
-            elements << strings[i]
+        if (strings.length > 1) {
+            (1..strings.length - 1).each { int i ->
+                elements << strings[i]
+            }
         }
         return new MockParameter(param: element, params: elements as String[])
     }
