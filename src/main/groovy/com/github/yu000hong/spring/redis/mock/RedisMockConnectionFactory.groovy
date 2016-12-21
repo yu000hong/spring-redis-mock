@@ -48,6 +48,9 @@ class RedisMockConnectionFactory implements InitializingBean, DisposableBean, Re
 
     @Override
     DataAccessException translateExceptionIfPossible(RuntimeException ex) {
-        return new DataAccessException(ex.message, ex) {}
+        return new DataAccessException(ex.message, ex) {
+            //do nothing
+        }
     }
+
 }

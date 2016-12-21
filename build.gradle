@@ -11,20 +11,21 @@ buildscript {
 
 apply plugin: 'net.researchgate.release'
 apply plugin: 'groovy'
-apply plugin: 'java'
+apply plugin: 'codenarc'
 apply plugin: 'maven-publish'
 
 sourceCompatibility = 1.7
 
 repositories {
     mavenCentral()
-    mavenLocal()
 }
 
 sourceSets {
     main {
-        java { srcDirs = [] }
-        groovy { srcDirs = ['src/main/java', 'src/main/groovy'] }
+        groovy { srcDirs = ['src/main/groovy'] }
+    }
+    test {
+        groovy { srcDirs = ['src/test/groovy'] }
     }
 }
 

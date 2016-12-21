@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets
 
 class RedisMockUtil {
 
+    @SuppressWarnings('ReturnsNullInsteadOfEmptyArray')
     public static final byte[] serialize(String value) {
         if (value == null) {
             return null
@@ -18,10 +19,10 @@ class RedisMockUtil {
         return new String(value, StandardCharsets.UTF_8)
     }
 
-    public static final String[] unserialize(byte[] ... vals) {
-        def array = new String[vals.length]
+    public static final String[] unserialize(byte[] ... values) {
+        def array = new String[values.length]
         def i = 0
-        vals.each { val ->
+        values.each { val ->
             array[i++] = unserialize(val)
         }
         return array
