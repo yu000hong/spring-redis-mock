@@ -20,15 +20,16 @@ class RedisMockUtil {
     }
 
     public static final String[] unserialize(byte[] ... values) {
+        assert values != null
         def array = new String[values.length]
-        def i = 0
-        values.each { val ->
-            array[i++] = unserialize(val)
+        values.eachWithIndex { value, i ->
+            array[i] = unserialize(value)
         }
         return array
     }
 
     public static MockParameter parseParameter(byte[] ... values) {
+        assert values != null
         def strings = unserialize(values)
         def element = strings[0]
         def elements = []
