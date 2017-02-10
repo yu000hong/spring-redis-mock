@@ -54,3 +54,10 @@ publishing {
         }
     }
 }
+
+codenarc {
+    configFile = new File('config/codenarc/codenarc.xml')
+    maxPriority1Violations = 0
+    maxPriority2Violations = 80
+    maxPriority3Violations = 10
+}
