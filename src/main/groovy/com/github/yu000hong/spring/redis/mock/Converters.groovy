@@ -89,11 +89,7 @@ class Converters {
      * Long -> Boolean
      */
     public static final Closure<Boolean> LONG_TO_BOOLEAN = { Long value ->
-        if (value == null) {
-            return false
-        } else {
-            return value as Boolean
-        }
+        return value == null ? false : value as Boolean
     }
 
     /**
