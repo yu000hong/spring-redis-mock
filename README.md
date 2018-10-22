@@ -10,6 +10,24 @@ The purpose of this project is:
 
 An in-memory redis-compatible implementation written in pure Java.
 
+### Usage
+
+**build.gradle**
+
+```
+repositories {
+    maven {
+        url 'https://jitpack.io'
+    }
+}
+
+dependencies {
+    compile group: 'com.github.yu000hong', name: 'spring-redis-mock', version: '1.1.4'
+}
+```
+
+
+
 # Reference
 
 [redis-mock-java](https://github.com/wilkenstein/redis-mock-java)
