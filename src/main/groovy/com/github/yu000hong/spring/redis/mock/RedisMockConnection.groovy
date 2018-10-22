@@ -6,12 +6,8 @@ import org.rarefiedredis.redis.RedisMock
 import org.springframework.data.redis.connection.AbstractRedisConnection
 import org.springframework.data.redis.connection.DataType
 import org.springframework.data.redis.connection.MessageListener
-import org.springframework.data.redis.connection.RedisListCommands
 import org.springframework.data.redis.connection.RedisNode
 import org.springframework.data.redis.connection.RedisPipelineException
-import org.springframework.data.redis.connection.RedisServerCommands
-import org.springframework.data.redis.connection.RedisStringCommands
-import org.springframework.data.redis.connection.RedisZSetCommands
 import org.springframework.data.redis.connection.ReturnType
 import org.springframework.data.redis.connection.SortParameters
 import org.springframework.data.redis.connection.Subscription
@@ -41,7 +37,7 @@ class RedisMockConnection extends AbstractRedisConnection {
     private List<Object> pipelineResults
     private List<Closure> multiResultConverts
 
-    public RedisMockConnection(RedisMock mock) {
+    RedisMockConnection(RedisMock mock) {
         Assert.notNull(mock, 'a not-null instance required')
         this.mock = mock
     }
@@ -811,7 +807,7 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Long lInsert(byte[] key, RedisListCommands.Position where, byte[] pivot, byte[] value) {
+    Long lInsert(byte[] key, Position where, byte[] pivot, byte[] value) {
         //TODO
         throw new UnsupportedOperationException()
     }
@@ -1112,21 +1108,21 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    void set(byte[] key, byte[] value) {
+    Boolean set(byte[] key, byte[] value) {
         if (isQueueing()) {
             client.set(unserialize(key), unserialize(value))
             multiResultConverts << NULL
-            return
+            return null
         }
         if (isPipelined()) {
             pipeline(client.set(unserialize(key), unserialize(value)), NULL)
-            return
+            return null
         }
-        client.set(unserialize(key), unserialize(value))
+        return Boolean.valueOf(client.set(unserialize(key), unserialize(value)))
     }
 
     @Override
-    void set(byte[] key, byte[] value, Expiration expiration, RedisStringCommands.SetOption option) {
+    Boolean set(byte[] key, byte[] value, Expiration expiration, SetOption option) {
         def options = []
         if (expiration) {
             options << 'px'
@@ -1134,13 +1130,13 @@ class RedisMockConnection extends AbstractRedisConnection {
         }
         if (option) {
             switch (option) {
-                case RedisStringCommands.SetOption.UPSERT:
+                case SetOption.UPSERT:
                     //do nothing
                     break
-                case RedisStringCommands.SetOption.SET_IF_ABSENT:
+                case SetOption.SET_IF_ABSENT:
                     options << 'nx'
                     break
-                case RedisStringCommands.SetOption.SET_IF_PRESENT:
+                case SetOption.SET_IF_PRESENT:
                     options << 'xx'
                     break
                 default:
@@ -1150,13 +1146,13 @@ class RedisMockConnection extends AbstractRedisConnection {
         if (isQueueing()) {
             client.set(unserialize(key), unserialize(value), options as String[])
             multiResultConverts << NULL
-            return
+            return null
         }
         if (isPipelined()) {
             pipeline(client.set(unserialize(key), unserialize(value), options as String[]), NULL)
-            return
+            return null
         }
-        client.set(unserialize(key), unserialize(value), options as String[])
+        return Boolean.valueOf(client.set(unserialize(key), unserialize(value), options as String[]))
     }
 
     @Override
@@ -1174,50 +1170,51 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    void setEx(byte[] key, long seconds, byte[] value) {
+    Boolean setEx(byte[] key, long seconds, byte[] value) {
         if (isQueueing()) {
             client.setex(unserialize(key), (int) seconds, unserialize(value))
             multiResultConverts << NULL
-            return
+            return null
         }
         if (isPipelined()) {
             pipeline(client.setex(unserialize(key), (int) seconds, unserialize(value)), NULL)
-            return
+            return null
         }
-        client.setex(unserialize(key), (int) seconds, unserialize(value))
+        return Boolean.valueOf(client.setex(unserialize(key), (int) seconds, unserialize(value)))
     }
 
     @Override
-    void pSetEx(byte[] key, long milliseconds, byte[] value) {
+    Boolean pSetEx(byte[] key, long milliseconds, byte[] value) {
         if (isQueueing()) {
             client.psetex(unserialize(key), milliseconds, unserialize(value))
             multiResultConverts << NULL
-            return
+            return null
         }
         if (isPipelined()) {
             pipeline(client.psetex(unserialize(key), milliseconds, unserialize(value)), NULL)
-            return
+            return null
         }
-        client.psetex(unserialize(key), milliseconds, unserialize(value))
+        return Boolean.valueOf(client.psetex(unserialize(key), milliseconds, unserialize(value)))
     }
 
     @Override
-    void mSet(Map<byte[], byte[]> tuple) {
+    Boolean mSet(Map<byte[], byte[]> tuple) {
         def keysValues = []
         tuple.each { k, v ->
             keysValues << unserialize(k)
             keysValues << unserialize(v)
         }
+        String[] keysValuesArray = keysValues.toArray(new String[0])
         if (isQueueing()) {
-            client.mset(keysValues)
+            client.mset(keysValuesArray)
             multiResultConverts << NULL
-            return
+            return null
         }
         if (isPipelined()) {
-            pipeline(client.mset(keysValues), NULL)
-            return
+            pipeline(client.mset(keysValuesArray), NULL)
+            return null
         }
-        client.mset(keysValues)
+        return Boolean.valueOf(client.mset(keysValuesArray))
     }
 
     @Override
@@ -1227,16 +1224,17 @@ class RedisMockConnection extends AbstractRedisConnection {
             keysValues << unserialize(k)
             keysValues << unserialize(v)
         }
+        String[] keysValuesArray = keysValues.toArray(new String[0])
         if (isQueueing()) {
-            client.msetnx(keysValues)
+            client.msetnx(keysValuesArray)
             multiResultConverts << DO_NOTHING
             return null
         }
         if (isPipelined()) {
-            pipeline(client.msetnx(keysValues))
+            pipeline(client.msetnx(keysValuesArray))
             return null
         }
-        return client.msetnx(keysValues)
+        return client.msetnx(keysValuesArray)
     }
 
     @Override
@@ -1411,7 +1409,7 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Long bitOp(RedisStringCommands.BitOperation op, byte[] destination, byte[] ... keys) {
+    Long bitOp(BitOperation op, byte[] destination, byte[] ... keys) {
         String operation = op.toString().toLowerCase()
         String destKey = unserialize(destination)
         String opKeys = unserialize(keys)
@@ -1454,7 +1452,7 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Long zAdd(byte[] key, Set<RedisZSetCommands.Tuple> tuples) {
+    Long zAdd(byte[] key, Set<Tuple> tuples) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1490,7 +1488,7 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Set<RedisZSetCommands.Tuple> zRangeWithScores(byte[] key, long begin, long end) {
+    Set<Tuple> zRangeWithScores(byte[] key, long begin, long end) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1502,13 +1500,13 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Set<RedisZSetCommands.Tuple> zRangeByScoreWithScores(byte[] key, RedisZSetCommands.Range range) {
+    Set<Tuple> zRangeByScoreWithScores(byte[] key, Range range) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
 
     @Override
-    Set<RedisZSetCommands.Tuple> zRangeByScoreWithScores(byte[] key, double min, double max) {
+    Set<Tuple> zRangeByScoreWithScores(byte[] key, double min, double max) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1520,13 +1518,13 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Set<RedisZSetCommands.Tuple> zRangeByScoreWithScores(byte[] key, double min, double max, long offset, long count) {
+    Set<Tuple> zRangeByScoreWithScores(byte[] key, double min, double max, long offset, long count) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
 
     @Override
-    Set<RedisZSetCommands.Tuple> zRangeByScoreWithScores(byte[] key, RedisZSetCommands.Range range, RedisZSetCommands.Limit limit) {
+    Set<Tuple> zRangeByScoreWithScores(byte[] key, Range range, Limit limit) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1538,7 +1536,7 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Set<RedisZSetCommands.Tuple> zRevRangeWithScores(byte[] key, long begin, long end) {
+    Set<Tuple> zRevRangeWithScores(byte[] key, long begin, long end) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1550,13 +1548,13 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Set<byte[]> zRevRangeByScore(byte[] key, RedisZSetCommands.Range range) {
+    Set<byte[]> zRevRangeByScore(byte[] key, Range range) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
 
     @Override
-    Set<RedisZSetCommands.Tuple> zRevRangeByScoreWithScores(byte[] key, double min, double max) {
+    Set<Tuple> zRevRangeByScoreWithScores(byte[] key, double min, double max) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1568,25 +1566,25 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Set<byte[]> zRevRangeByScore(byte[] key, RedisZSetCommands.Range range, RedisZSetCommands.Limit limit) {
+    Set<byte[]> zRevRangeByScore(byte[] key, Range range, Limit limit) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
 
     @Override
-    Set<RedisZSetCommands.Tuple> zRevRangeByScoreWithScores(byte[] key, double min, double max, long offset, long count) {
+    Set<Tuple> zRevRangeByScoreWithScores(byte[] key, double min, double max, long offset, long count) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
 
     @Override
-    Set<RedisZSetCommands.Tuple> zRevRangeByScoreWithScores(byte[] key, RedisZSetCommands.Range range) {
+    Set<Tuple> zRevRangeByScoreWithScores(byte[] key, Range range) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
 
     @Override
-    Set<RedisZSetCommands.Tuple> zRevRangeByScoreWithScores(byte[] key, RedisZSetCommands.Range range, RedisZSetCommands.Limit limit) {
+    Set<Tuple> zRevRangeByScoreWithScores(byte[] key, Range range, Limit limit) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1598,7 +1596,7 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Long zCount(byte[] key, RedisZSetCommands.Range range) {
+    Long zCount(byte[] key, Range range) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1631,7 +1629,7 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Long zRemRangeByScore(byte[] key, RedisZSetCommands.Range range) {
+    Long zRemRangeByScore(byte[] key, Range range) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1643,7 +1641,7 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Long zUnionStore(byte[] destKey, RedisZSetCommands.Aggregate aggregate, int[] weights, byte[] ... sets) {
+    Long zUnionStore(byte[] destKey, Aggregate aggregate, int[] weights, byte[] ... sets) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1655,13 +1653,13 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Long zInterStore(byte[] destKey, RedisZSetCommands.Aggregate aggregate, int[] weights, byte[] ... sets) {
+    Long zInterStore(byte[] destKey, Aggregate aggregate, int[] weights, byte[] ... sets) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
 
     @Override
-    Cursor<RedisZSetCommands.Tuple> zScan(byte[] key, ScanOptions options) {
+    Cursor<Tuple> zScan(byte[] key, ScanOptions options) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1673,7 +1671,7 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Set<byte[]> zRangeByScore(byte[] key, RedisZSetCommands.Range range) {
+    Set<byte[]> zRangeByScore(byte[] key, Range range) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1685,7 +1683,7 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Set<byte[]> zRangeByScore(byte[] key, RedisZSetCommands.Range range, RedisZSetCommands.Limit limit) {
+    Set<byte[]> zRangeByScore(byte[] key, Range range, Limit limit) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1697,13 +1695,13 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    Set<byte[]> zRangeByLex(byte[] key, RedisZSetCommands.Range range) {
+    Set<byte[]> zRangeByLex(byte[] key, Range range) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
 
     @Override
-    Set<byte[]> zRangeByLex(byte[] key, RedisZSetCommands.Range range, RedisZSetCommands.Limit limit) {
+    Set<byte[]> zRangeByLex(byte[] key, Range range, Limit limit) {
         //TODO unimplemented
         throw new UnsupportedOperationException()
     }
@@ -1766,19 +1764,19 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    def <T> T eval(byte[] script, ReturnType returnType, int numKeys, byte[] ... keysAndArgs) {
+    <T> T eval(byte[] script, ReturnType returnType, int numKeys, byte[] ... keysAndArgs) {
         //TODO RedisMock support lua script
         throw new UnsupportedOperationException()
     }
 
     @Override
-    def <T> T evalSha(String scriptSha, ReturnType returnType, int numKeys, byte[] ... keysAndArgs) {
+    <T> T evalSha(String scriptSha, ReturnType returnType, int numKeys, byte[] ... keysAndArgs) {
         //TODO RedisMock support lua script
         throw new UnsupportedOperationException()
     }
 
     @Override
-    def <T> T evalSha(byte[] scriptSha, ReturnType returnType, int numKeys, byte[] ... keysAndArgs) {
+    <T> T evalSha(byte[] scriptSha, ReturnType returnType, int numKeys, byte[] ... keysAndArgs) {
         //TODO RedisMock support lua script
         throw new UnsupportedOperationException()
     }
@@ -1843,12 +1841,12 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    void shutdown(RedisServerCommands.ShutdownOption option) {
+    void shutdown(ShutdownOption option) {
         throw new UnsupportedOperationException()
     }
 
     @Override
-    List<String> getConfig(String pattern) {
+    Properties getConfig(String pattern) {
         throw new UnsupportedOperationException()
     }
 
@@ -1898,12 +1896,12 @@ class RedisMockConnection extends AbstractRedisConnection {
     }
 
     @Override
-    void migrate(byte[] key, RedisNode target, int dbIndex, RedisServerCommands.MigrateOption option) {
+    void migrate(byte[] key, RedisNode target, int dbIndex, MigrateOption option) {
         throw new UnsupportedOperationException()
     }
 
     @Override
-    void migrate(byte[] key, RedisNode target, int dbIndex, RedisServerCommands.MigrateOption option, long timeout) {
+    void migrate(byte[] key, RedisNode target, int dbIndex, MigrateOption option, long timeout) {
         throw new UnsupportedOperationException()
     }
 
