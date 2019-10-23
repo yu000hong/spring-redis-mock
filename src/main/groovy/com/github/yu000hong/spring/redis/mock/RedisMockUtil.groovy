@@ -5,21 +5,21 @@ import java.nio.charset.StandardCharsets
 class RedisMockUtil {
 
     @SuppressWarnings('ReturnsNullInsteadOfEmptyArray')
-    public static final byte[] serialize(String value) {
+    static final byte[] serialize(String value) {
         if (value == null) {
             return null
         }
         return value.getBytes(StandardCharsets.UTF_8)
     }
 
-    public static final String unserialize(byte[] value) {
+    static final String unserialize(byte[] value) {
         if (value == null) {
             return null
         }
         return new String(value, StandardCharsets.UTF_8)
     }
 
-    public static final String[] unserialize(byte[] ... values) {
+    static final String[] unserialize(byte[] ... values) {
         assert values != null
         def array = new String[values.length]
         values.eachWithIndex { value, i ->
@@ -28,7 +28,7 @@ class RedisMockUtil {
         return array
     }
 
-    public static MockParameter parseParameter(byte[] ... values) {
+    static MockParameter parseParameter(byte[] ... values) {
         assert values != null
         def strings = unserialize(values)
         def element = strings[0]
@@ -39,6 +39,22 @@ class RedisMockUtil {
             }
         }
         return new MockParameter(param: element, params: elements as String[])
+    }
+
+    static String toString(double value) {
+        return String.valueOf(value)
+    }
+
+    static String toString(long value) {
+        return String.valueOf(value)
+    }
+
+    static String toString(int value) {
+        return String.valueOf(value)
+    }
+
+    static String toString(byte[] value) {
+        return new String(value)
     }
 
 }

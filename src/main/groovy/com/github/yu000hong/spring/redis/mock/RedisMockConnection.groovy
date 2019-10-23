@@ -20,6 +20,8 @@ import org.springframework.util.Assert
 import static com.github.yu000hong.spring.redis.mock.Converters.DO_NOTHING
 import static com.github.yu000hong.spring.redis.mock.Converters.LONG_TO_BOOLEAN
 import static com.github.yu000hong.spring.redis.mock.Converters.NULL
+import static com.github.yu000hong.spring.redis.mock.Converters.PAIRSET_TO_BYTESSET
+import static com.github.yu000hong.spring.redis.mock.Converters.PAIRSET_TO_TUPLESET
 import static com.github.yu000hong.spring.redis.mock.Converters.STRINGLIST_TO_BYTESLIST
 import static com.github.yu000hong.spring.redis.mock.Converters.STRINGMAP_TO_BYTESMAP
 import static com.github.yu000hong.spring.redis.mock.Converters.STRINGSET_TO_BYTESSET
@@ -28,9 +30,17 @@ import static com.github.yu000hong.spring.redis.mock.Converters.STRING_TO_BYTES
 import static com.github.yu000hong.spring.redis.mock.Converters.STRING_TO_DOUBLE
 import static com.github.yu000hong.spring.redis.mock.RedisMockUtil.parseParameter
 import static com.github.yu000hong.spring.redis.mock.RedisMockUtil.serialize
+import static com.github.yu000hong.spring.redis.mock.RedisMockUtil.toString
 import static com.github.yu000hong.spring.redis.mock.RedisMockUtil.unserialize
+import static org.springframework.data.redis.connection.jedis.JedisConverters.NEGATIVE_INFINITY_BYTES
+import static org.springframework.data.redis.connection.jedis.JedisConverters.POSITIVE_INFINITY_BYTES
+import static org.springframework.data.redis.connection.jedis.JedisConverters.boundaryToBytesForZRange
+import static org.springframework.data.redis.connection.jedis.JedisConverters.boundaryToBytesForZRangeByLex
 
 class RedisMockConnection extends AbstractRedisConnection {
+    private static final WITH_SCORES = 'withscores'
+    private static final LIMIT = 'limit'
+
     private final RedisMock mock
     private boolean pipelined
     private IRedisClient multiMock
@@ -1453,152 +1463,195 @@ class RedisMockConnection extends AbstractRedisConnection {
 
     @Override
     Long zAdd(byte[] key, Set<Tuple> tuples) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        IRedisSortedSet.ZsetPair pair = null
+        IRedisSortedSet.ZsetPair[] pairs = []
+        tuples.each { tuple ->
+            def newPair = new IRedisSortedSet.ZsetPair(unserialize(tuple.value), tuple.score)
+            if (pair == null) {
+                pair = newPair
+            } else {
+                pairs << newPair
+            }
+        }
+        return doing {
+            return client.zadd(unserialize(key), pair, pairs)
+        }
     }
 
     @Override
     Long zRem(byte[] key, byte[] ... values) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing {
+            def parameter = parseParameter(values)
+            return client.zrem(unserialize(key), parameter.param, parameter.params)
+        }
     }
 
     @Override
     Double zIncrBy(byte[] key, double increment, byte[] value) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(STRING_TO_DOUBLE) {
+            client.zincrby(unserialize(key), increment, unserialize(value))
+        }
     }
 
     @Override
     Long zRank(byte[] key, byte[] value) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing {
+            client.zrank(unserialize(key), unserialize(value))
+        }
     }
 
     @Override
     Long zRevRank(byte[] key, byte[] value) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing {
+            client.zrevrank(unserialize(key), unserialize(value))
+        }
     }
 
     @Override
     Set<byte[]> zRange(byte[] key, long begin, long end) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_BYTESSET) {
+            client.zrange(unserialize(key), begin, end)
+        }
     }
 
     @Override
     Set<Tuple> zRangeWithScores(byte[] key, long begin, long end) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_TUPLESET) {
+            client.zrange(unserialize(key), begin, end, WITH_SCORES)
+        }
     }
 
     @Override
     Set<byte[]> zRangeByScore(byte[] key, double min, double max) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_BYTESSET) {
+            client.zrangebyscore(unserialize(key), toString(min), toString(max))
+        }
     }
 
     @Override
     Set<Tuple> zRangeByScoreWithScores(byte[] key, Range range) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        String min = toString(boundaryToBytesForZRange(range.min, NEGATIVE_INFINITY_BYTES))
+        String max = toString(boundaryToBytesForZRange(range.max, POSITIVE_INFINITY_BYTES))
+        return doing(PAIRSET_TO_TUPLESET) {
+            client.zrangebyscore(unserialize(key), min, max, WITH_SCORES)
+        }
     }
 
     @Override
     Set<Tuple> zRangeByScoreWithScores(byte[] key, double min, double max) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_TUPLESET) {
+            client.zrangebyscore(unserialize(key), toString(min), toString(max), WITH_SCORES)
+        }
     }
 
     @Override
     Set<byte[]> zRangeByScore(byte[] key, double min, double max, long offset, long count) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_BYTESSET) {
+            client.zrangebyscore(unserialize(key), toString(min), toString(max), LIMIT, toString(offset), toString(count))
+        }
     }
 
     @Override
     Set<Tuple> zRangeByScoreWithScores(byte[] key, double min, double max, long offset, long count) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_TUPLESET) {
+            client.zrangebyscore(unserialize(key), toString(min), toString(max), LIMIT, toString(offset), toString(count), WITH_SCORES)
+        }
     }
 
     @Override
     Set<Tuple> zRangeByScoreWithScores(byte[] key, Range range, Limit limit) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        String min = toString(boundaryToBytesForZRange(range.min, NEGATIVE_INFINITY_BYTES))
+        String max = toString(boundaryToBytesForZRange(range.max, POSITIVE_INFINITY_BYTES))
+        return doing(PAIRSET_TO_TUPLESET) {
+            client.zrangebyscore(unserialize(key), min, max, LIMIT, toString(limit.offset), toString(limit.count), WITH_SCORES)
+        }
     }
 
     @Override
     Set<byte[]> zRevRange(byte[] key, long begin, long end) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_BYTESSET) {
+            client.zrevrange(unserialize(key), begin, end)
+        }
     }
 
     @Override
     Set<Tuple> zRevRangeWithScores(byte[] key, long begin, long end) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_TUPLESET) {
+            client.zrevrange(unserialize(key), begin, end, WITH_SCORES)
+        }
     }
 
     @Override
     Set<byte[]> zRevRangeByScore(byte[] key, double min, double max) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_BYTESSET) {
+            client.zrevrangebyscore(unserialize(key), toString(max), toString(min))
+        }
     }
 
     @Override
     Set<byte[]> zRevRangeByScore(byte[] key, Range range) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return zRevRangeByScore(key, range, Limit.unlimited())
     }
 
     @Override
     Set<Tuple> zRevRangeByScoreWithScores(byte[] key, double min, double max) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_TUPLESET) {
+            client.zrevrangebyscore(unserialize(key), toString(max), toString(min), WITH_SCORES)
+        }
     }
 
     @Override
     Set<byte[]> zRevRangeByScore(byte[] key, double min, double max, long offset, long count) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_BYTESSET) {
+            client.zrevrangebyscore(unserialize(key), toString(max), toString(min), LIMIT, toString(offset), toString(count))
+        }
     }
 
     @Override
     Set<byte[]> zRevRangeByScore(byte[] key, Range range, Limit limit) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        String min = toString(boundaryToBytesForZRange(range.min, NEGATIVE_INFINITY_BYTES))
+        String max = toString(boundaryToBytesForZRange(range.max, POSITIVE_INFINITY_BYTES))
+        return doing(PAIRSET_TO_BYTESSET) {
+            client.zrevrangebyscore(unserialize(key), max, min, LIMIT, toString(limit.offset), toString(limit.count))
+        }
     }
 
     @Override
     Set<Tuple> zRevRangeByScoreWithScores(byte[] key, double min, double max, long offset, long count) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_TUPLESET) {
+            client.zrevrangebyscore(unserialize(key), toString(max), toString(min), LIMIT, toString(offset), toString(count), WITH_SCORES)
+        }
     }
 
     @Override
     Set<Tuple> zRevRangeByScoreWithScores(byte[] key, Range range) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return zRevRangeByScoreWithScores(key, range, Limit.unlimited())
     }
 
     @Override
     Set<Tuple> zRevRangeByScoreWithScores(byte[] key, Range range, Limit limit) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        String min = toString(boundaryToBytesForZRange(range.min, NEGATIVE_INFINITY_BYTES))
+        String max = toString(boundaryToBytesForZRange(range.max, POSITIVE_INFINITY_BYTES))
+        return doing(PAIRSET_TO_TUPLESET) {
+            client.zrevrangebyscore(unserialize(key), max, min, LIMIT, toString(limit.offset), toString(limit.count), WITH_SCORES)
+        }
     }
 
     @Override
     Long zCount(byte[] key, double min, double max) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing {
+            client.zcount(unserialize(key), min, max)
+        }
     }
 
     @Override
     Long zCount(byte[] key, Range range) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        range
+        String min = toString(boundaryToBytesForZRange(range.min, NEGATIVE_INFINITY_BYTES))
+        String max = toString(boundaryToBytesForZRange(range.max, POSITIVE_INFINITY_BYTES))
+        return doing {
+            client.zcount(unserialize(key), Double.valueOf(min), Double.valueOf(max))
+        }
     }
 
     @Override
@@ -1617,21 +1670,25 @@ class RedisMockConnection extends AbstractRedisConnection {
 
     @Override
     Long zRemRange(byte[] key, long begin, long end) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing() {
+            client.zremrangebyrank(unserialize(key), begin, end)
+        }
     }
 
     @Override
     Long zRemRangeByScore(byte[] key, double min, double max) {
         return doing() {
-            return client.zremrangebyscore(unserialize(key), String.valueOf(min), String.valueOf(max))
+            client.zremrangebyscore(unserialize(key), String.valueOf(min), String.valueOf(max))
         }
     }
 
     @Override
     Long zRemRangeByScore(byte[] key, Range range) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        String min = toString(boundaryToBytesForZRange(range.min, NEGATIVE_INFINITY_BYTES))
+        String max = toString(boundaryToBytesForZRange(range.max, POSITIVE_INFINITY_BYTES))
+        return doing() {
+            client.zremrangebyscore(unserialize(key), min, max)
+        }
     }
 
     @Override
@@ -1666,44 +1723,53 @@ class RedisMockConnection extends AbstractRedisConnection {
 
     @Override
     Set<byte[]> zRangeByScore(byte[] key, String min, String max) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_BYTESSET) {
+            client.zrangebyscore(unserialize(key), min, max)
+        }
     }
 
     @Override
     Set<byte[]> zRangeByScore(byte[] key, Range range) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        String min = toString(boundaryToBytesForZRange(range.min, NEGATIVE_INFINITY_BYTES))
+        String max = toString(boundaryToBytesForZRange(range.max, POSITIVE_INFINITY_BYTES))
+        return doing(PAIRSET_TO_BYTESSET) {
+            client.zrangebyscore(unserialize(key), min, max)
+        }
     }
 
     @Override
     Set<byte[]> zRangeByScore(byte[] key, String min, String max, long offset, long count) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return doing(PAIRSET_TO_BYTESSET) {
+            client.zrangebyscore(unserialize(key), min, max, LIMIT, toString(offset), toString(count))
+        }
     }
 
     @Override
     Set<byte[]> zRangeByScore(byte[] key, Range range, Limit limit) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        String min = toString(boundaryToBytesForZRange(range.min, NEGATIVE_INFINITY_BYTES))
+        String max = toString(boundaryToBytesForZRange(range.max, POSITIVE_INFINITY_BYTES))
+        return doing(PAIRSET_TO_BYTESSET) {
+            client.zrangebyscore(unserialize(key), min, max, LIMIT, toString(limit.offset), toString(limit.count))
+        }
     }
 
     @Override
     Set<byte[]> zRangeByLex(byte[] key) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return zRangeByLex(key, Range.unbounded())
     }
 
     @Override
     Set<byte[]> zRangeByLex(byte[] key, Range range) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        return zRangeByLex(key, Range.unbounded(), Limit.unlimited())
     }
 
     @Override
     Set<byte[]> zRangeByLex(byte[] key, Range range, Limit limit) {
-        //TODO unimplemented
-        throw new UnsupportedOperationException()
+        String min = toString(boundaryToBytesForZRangeByLex(range.min, NEGATIVE_INFINITY_BYTES))
+        String max = toString(boundaryToBytesForZRangeByLex(range.max, POSITIVE_INFINITY_BYTES))
+        return doing(PAIRSET_TO_BYTESSET) {
+            client.zrangebylex(unserialize(key), min, max, LIMIT, toString(limit.offset), toString(limit.count))
+        }
     }
 
     //endregion

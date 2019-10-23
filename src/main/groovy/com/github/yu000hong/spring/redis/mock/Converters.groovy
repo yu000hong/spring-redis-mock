@@ -1,5 +1,12 @@
 package com.github.yu000hong.spring.redis.mock
 
+import org.rarefiedredis.redis.IRedisSortedSet
+import org.springframework.data.redis.connection.DefaultTuple
+import org.springframework.data.redis.connection.RedisZSetCommands.Tuple
+
+import static com.github.yu000hong.spring.redis.mock.RedisMockUtil.serialize
+import static com.github.yu000hong.spring.redis.mock.RedisMockUtil.unserialize
+
 /**
  * 类型转换Closure
  */
@@ -23,14 +30,14 @@ class Converters {
      * byte[] -> String
      */
     public static final Closure<String> BYTES_TO_STRING = { byte[] bytes ->
-        return RedisMockUtil.unserialize(bytes)
+        return unserialize(bytes)
     }
 
     /**
      * String -> byte[]
      */
     public static final Closure<byte[]> STRING_TO_BYTES = { String string ->
-        return RedisMockUtil.serialize(string)
+        return serialize(string)
     }
 
     /**
@@ -41,7 +48,7 @@ class Converters {
             return null
         }
         return strings.collect { string ->
-            return RedisMockUtil.serialize(string)
+            return serialize(string)
         }
     }
 
@@ -53,7 +60,7 @@ class Converters {
             return null
         }
         return list.collect { String item ->
-            return RedisMockUtil.serialize(item)
+            return serialize(item)
         }
     }
 
@@ -66,7 +73,7 @@ class Converters {
         }
         def results = [] as Set
         set.each { key ->
-            results << RedisMockUtil.serialize(key)
+            results << serialize(key)
         }
         return results
     }
@@ -80,9 +87,17 @@ class Converters {
         }
         def results = [:]
         map.each { k, v ->
-            results[RedisMockUtil.serialize(k)] = RedisMockUtil.serialize(v)
+            results[serialize(k)] = serialize(v)
         }
         return results
+    }
+
+    public static final Closure<Set<byte[]>> PAIRSET_TO_BYTESSET = { Set<IRedisSortedSet.ZsetPair> set ->
+        return set.collect { pair -> serialize(pair.member) } as Set<byte[]>
+    }
+
+    public static final Closure<Set<Tuple>> PAIRSET_TO_TUPLESET = { Set<IRedisSortedSet.ZsetPair> set ->
+        return set.collect { pair -> new DefaultTuple(serialize(pair.member), pair.score) } as Set<Tuple>
     }
 
     /**
