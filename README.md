@@ -22,7 +22,7 @@ repositories {
 }
 
 dependencies {
-    compile group: 'com.github.yu000hong', name: 'spring-redis-mock', version: '2.0.0'
+    compile group: 'com.github.yu000hong', name: 'spring-redis-mock', version: '2.0.1'
 }
 ```
 
