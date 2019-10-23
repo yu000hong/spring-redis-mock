@@ -11,7 +11,6 @@ buildscript {
 
 apply plugin: 'net.researchgate.release'
 apply plugin: 'groovy'
-apply plugin: 'codenarc'
 apply plugin: 'maven-publish'
 
 sourceCompatibility = JavaVersion.VERSION_1_8
@@ -57,11 +56,4 @@ publishing {
             from components.java
         }
     }
-}
-
-codenarc {
-    configFile = new File('config/codenarc/codenarc.xml')
-    maxPriority1Violations = 0
-    maxPriority2Violations = 80
-    maxPriority3Violations = 10
 }
