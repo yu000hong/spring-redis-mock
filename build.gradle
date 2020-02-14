@@ -34,7 +34,7 @@ dependencies {
     //groovy
     compile group: 'org.codehaus.groovy', name: 'groovy-all', version: '3.0.0-alpha-1'
     //spring data redis
-    compile group: 'org.springframework.data', name: 'spring-data-redis', version: '2.0.7.RELEASE'
+    compile group: 'org.springframework.data', name: 'spring-data-redis', version: '2.1.0.RELEASE'
     //jedis
     compile group: 'redis.clients', name: 'jedis', version: '2.9.0'
     //redis-mock-java

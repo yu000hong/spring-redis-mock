@@ -33,3 +33,10 @@ dependencies {
 [redis-mock-java](https://github.com/wilkenstein/redis-mock-java)
 
 [Spring Data Redis](http://projects.spring.io/spring-data-redis/)
+
+
+# Release Notes
+
+### 2.2.0
+
+- change spring-data-redis version from 2.0.7-RELEASE to 2.1.0-RELEASE
